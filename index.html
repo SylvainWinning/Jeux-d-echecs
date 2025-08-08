@@ -462,7 +462,7 @@
       });
 
       // Surlignage des coups possibles au survol
-      board.addEventListener("mouseover-square", (e) => {
+      board.addEventListener("square-mouseover", (e) => {
         if (!aidesEl.checked) return;
         const { square } = e.detail;
         const moves = game.moves({ square, verbose: true });
@@ -470,7 +470,10 @@
         highlight(square);
         for (const m of moves) highlight(m.to);
       });
-      board.addEventListener("mouseout-square", () => clearHighlights());
+      board.addEventListener("square-mouseout", () => {
+        clearHighlights();
+        highlightLastMove(lastMove);
+      });
 
       // Synchronise l'affichage après un snap ou roque
       board.addEventListener("snap-end", () => board.setPosition(game.fen()));
