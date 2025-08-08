@@ -21,6 +21,24 @@
       .ok { color: #047857; }
       .warn { color: #b45309; }
       .bad { color: #b91c1c; }
+      .moves { margin: 0; padding-left: 20px; max-height: 220px; overflow: auto; }
+      .moves li { cursor: pointer; line-height: 1.4; }
+      .moves li.active { font-weight: 600; }
+
+      .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,1px,1px); white-space: nowrap; border: 0; }
+      .dialog.hidden { display: none; }
+      .dialog { position: fixed; inset: 0; background: rgba(0,0,0,.4); display: grid; place-items: center; z-index: 20; }
+      .dialog-content { background: white; color: #111; padding: 12px; border-radius: 10px; min-width: 220px; box-shadow: 0 10px 30px rgba(0,0,0,.2); }
+      .dialog-title { margin: 0 0 8px 0; font-weight: 600; }
+      .promo-choices { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 8px; }
+      .promo-choices .promo { padding: 8px 10px; }
+
+      /* Dark theme */
+      :root { color-scheme: light dark; }
+      [data-theme="dark"] .wrap { background: #0f172a; }
+      [data-theme="dark"] .panel { background: #0b1220; border-color: #1f2937; }
+      [data-theme="dark"] body, [data-theme="dark"] .hint { color: #cbd5e1; }
+      [data-theme="dark"] .controls > * { background: #0b1220; color: #e5e7eb; border-color: #1f2937; }
     </style>
   </head>
   <body>
@@ -32,7 +50,6 @@
               Mode
               <select id="mode">
                 <option value="hvh">2 joueurs - même écran</option>
-                <option value="hvb">Contre l'ordi - facile</option>
               </select>
             </label>
 
@@ -42,7 +59,17 @@
             </label>
 
             <button id="undo">Annuler</button>
+            <button id="redo">Refaire</button>
             <button id="reset">Nouvelle partie</button>
+            <button id="exportPGN">Exporter PGN</button>
+            <button id="importFEN">Importer FEN</button>
+            <button id="importPGN">Importer PGN</button>
+            <button id="themeToggle">Thème</button>
+            <label> Taille
+              <input type="range" id="boardSize" min="360" max="720" step="10" value="560" />
+            </label>
+            <button id="shareLink">Copier lien</button>
+            <button id="capture">Capturer l’échiquier</button>
             <button id="flip">Inverser le plateau</button>
           </div>
 
@@ -52,10 +79,29 @@
         <!-- Le plateau. Notation visible par défaut, pièces déplaçables -->
         <chess-board id="board" position="start" draggable-pieces></chess-board>
 
+        <div class="panel" id="movesPanel">
+          <div class="hint">Historique des coups (clique pour revenir à une position)</div>
+          <ol id="moves" class="moves"></ol>
+        </div>
+
+        <div id="sr" class="sr-only" aria-live="polite"></div>
+
         <div class="panel">
           <div class="hint">
             Objectif: jouer des coups légaux. Survole une pièce pour voir ses cases possibles.
             Les pions de l’adversaire sont roses pour mieux les distinguer.
+          </div>
+        </div>
+
+        <div id="promoDialog" class="dialog hidden" role="dialog" aria-modal="true" aria-labelledby="promoTitle">
+          <div class="dialog-content">
+            <p id="promoTitle" class="dialog-title">Promotion</p>
+            <div class="promo-choices">
+              <button data-promo="q" class="promo">Dame</button>
+              <button data-promo="r" class="promo">Tour</button>
+              <button data-promo="b" class="promo">Fou</button>
+              <button data-promo="n" class="promo">Cavalier</button>
+            </div>
           </div>
         </div>
       </div>
@@ -72,6 +118,18 @@
       const btnUndo = document.getElementById("undo");
       const btnReset = document.getElementById("reset");
       const btnFlip = document.getElementById("flip");
+      const btnExportPGN = document.getElementById("exportPGN");
+      const movesEl = document.getElementById("moves");
+
+      const btnRedo = document.getElementById("redo");
+      const btnImportFEN = document.getElementById("importFEN");
+      const btnImportPGN = document.getElementById("importPGN");
+      const btnShareLink = document.getElementById("shareLink");
+      const btnCapture = document.getElementById("capture");
+      const btnThemeToggle = document.getElementById("themeToggle");
+      const sizeInput = document.getElementById("boardSize");
+      const srEl = document.getElementById("sr");
+      const promoDialog = document.getElementById("promoDialog");
 
       const game = new Chess();
 
@@ -99,18 +157,171 @@
       const highlightStyles = document.createElement("style");
       document.head.append(highlightStyles);
 
+      let lastMove = null; // {from, to}
+      let redoStack = [];
+      let focusSq = null; // ex: "e2"
+      let selectedSq = null; // case sélectionnée pour un déplacement clavier
+
       function clearHighlights() {
         highlightStyles.textContent = "";
       }
+
       function highlight(square) {
-        // Couleur selon la couleur de la case
         const whiteSq = "#e8e8e8";
         const blackSq = "#cfcfcf";
         const isWhite = ((square.charCodeAt(0) + square.charCodeAt(1)) % 2) === 0;
         const bg = isWhite ? whiteSq : blackSq;
+        // chessboard-element expose des parts par case sous la forme square-a1
         highlightStyles.textContent += `
-          chess-board::part(${square}) { box-shadow: inset 0 0 3px 3px ${bg}; }
+          chess-board::part(square-${square}) { box-shadow: inset 0 0 3px 3px ${bg}; }
         `;
+      }
+
+      function highlightLastMove(m) {
+        if (!m) return;
+        // Accentuer la source et la cible du dernier coup
+        highlightStyles.textContent += `
+          chess-board::part(square-${m.from}) { box-shadow: inset 0 0 0 3px rgba(34,197,94,.6); }
+          chess-board::part(square-${m.to}) { box-shadow: inset 0 0 0 3px rgba(59,130,246,.6); }
+        `;
+      }
+
+      function squareName(file, rank) { return `${"abcdefgh"[file]}${8 - rank}`; }
+
+      function highlightCheckKing() {
+        if (!game.in_check()) return;
+        const color = game.turn(); // le camp AU TRAIT est en échec
+        const b = game.board(); // 8x8
+        for (let r = 0; r < 8; r++) {
+          for (let f = 0; f < 8; f++) {
+            const p = b[r][f];
+            if (p && p.type === 'k' && p.color === color) {
+              const sq = squareName(f, r);
+              highlightStyles.textContent += `\nchess-board::part(square-${sq}){ box-shadow: inset 0 0 0 3px rgba(239,68,68,.7); }`;
+              return;
+            }
+          }
+        }
+      }
+
+      function highlightType(square, type) {
+        const color = type === 'capture' ? 'rgba(239,68,68,.35)'
+                     : type === 'promo' ? 'rgba(234,179,8,.35)'
+                     : 'rgba(34,197,94,.35)';
+        highlightStyles.textContent += `\nchess-board::part(square-${square}){ box-shadow: inset 0 0 6px 6px ${color}; }`;
+      }
+
+      // Sons simples (WebAudio)
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      const actx = new AudioCtx();
+      function beep(freq, dur=0.06){ const o=actx.createOscillator(); const g=actx.createGain(); o.connect(g); g.connect(actx.destination); o.frequency.value=freq; o.start(); g.gain.setValueAtTime(0.04, actx.currentTime); g.gain.exponentialRampToValueAtTime(0.0001, actx.currentTime+dur); o.stop(actx.currentTime+dur); }
+      function playSound(kind){ if (kind==='capture') beep(220,0.08); else if (kind==='check') { beep(660,0.07); setTimeout(()=>beep(440,0.07),60);} else beep(330,0.06); }
+
+      // Promotion UI -> Promise<'q'|'r'|'b'|'n'>
+      function choisirPromotion() {
+        return new Promise((resolve) => {
+          promoDialog.classList.remove('hidden');
+          const handler = (e) => {
+            const p = e.target.closest('[data-promo]');
+            if (!p) return;
+            promoDialog.classList.add('hidden');
+            promoDialog.removeEventListener('click', handler);
+            resolve(p.getAttribute('data-promo'));
+          };
+          promoDialog.addEventListener('click', handler);
+        });
+      }
+
+      function majLien(){ const u=new URL(location.href); u.searchParams.set('fen', encodeURIComponent(game.fen())); history.replaceState({}, '', u); }
+
+      function refreshOverlays(){
+        highlightStyles.textContent = '';
+        highlightLastMove(lastMove);
+        highlightCheckKing();
+        if (focusSq) {
+          highlightStyles.textContent += `\nchess-board::part(square-${focusSq}){ outline: 2px solid rgba(99,102,241,.9); outline-offset: -4px; }`;
+        }
+      }
+
+      function renderMoves() {
+        if (!movesEl) return;
+        const hist = game.history({ verbose: true });
+        movesEl.innerHTML = hist.map((m, i) => {
+          const half = i + 1;
+          const turn = Math.ceil(half / 2);
+          const prefix = half % 2 === 1 ? `${turn}. ` : `\u00A0`;
+          const san = m.san;
+          return `<li data-ply="${half}">${prefix}${san}</li>`;
+        }).join("");
+
+        // Activer clic pour revenir à une position
+        movesEl.querySelectorAll("li").forEach(li => {
+          li.addEventListener("click", () => {
+            const targetPly = parseInt(li.getAttribute("data-ply"), 10);
+            const pgn = game.pgn();
+            const tmp = new Chess();
+            // Rejouer jusqu'au demi-coup choisi
+            const moves = pgn.split(/\s+/).filter(x => /[a-hKQRNB0-9O-]/.test(x));
+            tmp.reset();
+            for (let i=0, ply=0; i<moves.length && ply<targetPly; i++) {
+              const mv = moves[i];
+              if (/^\d+\./.test(mv)) continue; // ignore "1." etc.
+              tmp.move(mv);
+              ply++;
+            }
+            game.load(tmp.fen());
+            board.setPosition(game.fen());
+            lastMove = null;
+            refreshOverlays();
+            updateStatus();
+            save();
+            // Marquer l'élément actif
+            movesEl.querySelectorAll("li").forEach(el => el.classList.remove("active"));
+            li.classList.add("active");
+
+            // Proposer de repartir d'ici si on n'était pas déjà au dernier demi-coup
+            if (targetPly < hist.length) {
+              statusEl.textContent = `Position au demi-coup ${targetPly}/${hist.length}. Clique un coup pour rejouer à partir d’ici.`;
+            }
+            redoStack = [];
+            majLien();
+          });
+        });
+      }
+
+      function save() {
+        const data = {
+          fen: game.fen(),
+          flip: board.orientation(),
+          mode: modeEl.value,
+          aides: aidesEl.checked,
+          boardMax: sizeInput ? sizeInput.value : undefined,
+          theme: document.documentElement.dataset.theme || ''
+        };
+        try { localStorage.setItem("chess-beginner", JSON.stringify(data)); } catch {}
+      }
+
+      function load() {
+        try {
+          const urlFenParam = new URL(location.href).searchParams.get('fen');
+          const urlFen = urlFenParam ? decodeURIComponent(urlFenParam) : '';
+          const raw = localStorage.getItem("chess-beginner");
+          const s = raw ? JSON.parse(raw) : {};
+
+          if (urlFen) { game.load(urlFen); }
+          else if (s.fen) { game.load(s.fen); }
+
+          board.setPosition(game.fen());
+          if (s.flip === "black") board.flip();
+          if (s.mode) modeEl.value = s.mode;
+          if (typeof s.aides === "boolean") aidesEl.checked = s.aides;
+          if (s.boardMax) { sizeInput.value = s.boardMax; document.documentElement.style.setProperty('--max', s.boardMax + 'px'); }
+          if (s.theme) { document.documentElement.dataset.theme = s.theme; }
+
+          renderMoves();
+          updateStatus();
+          majLien();
+        } catch {}
       }
 
       function updateStatus() {
@@ -118,21 +329,16 @@
         let text = `${turn} à jouer.`;
 
         if (game.in_checkmate()) text = `Échec et mat. ${turn} perdent.`;
-        else if (game.in_draw()) text = "Partie nulle.";
-        else if (game.in_check()) text += " Échec !";
+        else if (game.in_draw()) {
+          if (game.in_stalemate()) text = "Nulle par pat.";
+          else if (game.in_threefold_repetition()) text = "Nulle par répétition.";
+          else if (game.insufficient_material()) text = "Nulle – matériel insuffisant.";
+          else text = "Nulle – règle des 50 coups.";
+        } else if (game.in_check()) text += " Échec !";
 
         statusEl.textContent = text;
+        srEl.textContent = text;
         statusEl.className = "hint " + (game.in_checkmate() ? "bad" : game.in_check() ? "warn" : "ok");
-      }
-
-      function makeRandomComputerMove() {
-        if (game.game_over()) return;
-        const moves = game.moves({ verbose: true });
-        if (!moves.length) return;
-        const move = moves[Math.floor(Math.random() * moves.length)];
-        game.move(move.san);
-        board.setPosition(game.fen());
-        updateStatus();
       }
 
       // Empêche de prendre une pièce si ce n'est pas son tour ou si la partie est finie
@@ -146,20 +352,39 @@
       });
 
       // Dépôt de la pièce
-      board.addEventListener("drop", (e) => {
+      board.addEventListener("drop", async (e) => {
         const { source, target, setAction } = e.detail;
-        clearHighlights();
-        const move = game.move({ from: source, to: target, promotion: "q" });
+        refreshOverlays();
+
+        // Détection promotion potentielle
+        const piece = game.get(source);
+        const isPawn = piece && piece.type === 'p';
+        const lastRank = (piece && piece.color === 'w') ? '8' : '1';
+        const isPromo = isPawn && target.endsWith(lastRank);
+
+        let promo = 'q';
+        if (isPromo) promo = await choisirPromotion();
+
+        const move = game.move({ from: source, to: target, promotion: promo });
         if (move === null) {
-          setAction("snapback"); // coup illégal
+          setAction("snapback");
           return;
         }
-        updateStatus();
 
-        // Mode contre l'ordi
-        if (modeEl.value === "hvb" && !game.game_over()) {
-          setTimeout(makeRandomComputerMove, 300);
-        }
+        redoStack = []; // nouveau coup -> on vide la pile de refaire
+        updateStatus();
+        lastMove = { from: move.from, to: move.to };
+        refreshOverlays();
+        renderMoves();
+        save();
+        majLien();
+
+        // Sons
+        if (move.flags && move.flags.includes('c')) playSound('capture');
+        else if (game.in_check()) playSound('check');
+        else playSound('move');
+
+        srEl.textContent = `${move.color === 'w' ? 'Blanc' : 'Noir'} joue ${move.san}.`;
       });
 
       // Surlignage des coups possibles au survol
@@ -169,35 +394,166 @@
         const moves = game.moves({ square, verbose: true });
         if (!moves.length) return;
         highlight(square);
-        for (const m of moves) highlight(m.to);
+        for (const m of moves) {
+          const type = m.promotion ? 'promo' : (m.flags && m.flags.includes('c')) ? 'capture' : 'move';
+          highlightType(m.to, type);
+        }
       });
-      board.addEventListener("mouseout-square", () => clearHighlights());
+      board.addEventListener("mouseout-square", () => refreshOverlays());
 
       // Synchronise l'affichage après un snap ou roque
-      board.addEventListener("snap-end", () => board.setPosition(game.fen()));
+      board.addEventListener("snap-end", () => {
+        board.setPosition(game.fen());
+        refreshOverlays();
+      });
 
       // Boutons
       btnReset.addEventListener("click", () => {
         game.reset();
         board.start();
         updateStatus();
-        clearHighlights();
+        lastMove = null;
+        renderMoves();
+        save();
+        redoStack = [];
+        majLien();
+        refreshOverlays();
       });
 
       btnUndo.addEventListener("click", () => {
-        // En mode vs ordi, on annule 2 demi-coups pour revenir à ton tour
-        if (modeEl.value === "hvb") { game.undo(); game.undo(); }
-        else { game.undo(); }
+        const undone = game.undo();
+        if (!undone) return;
+        redoStack.push(undone);
         board.setPosition(game.fen());
         updateStatus();
+        lastMove = null;
+        refreshOverlays();
+        renderMoves();
+        save();
+        majLien();
+      });
+
+      btnRedo.addEventListener("click", () => {
+        const m = redoStack.pop();
+        if (!m) return;
+        const move = game.move({ from: m.from, to: m.to, promotion: m.promotion || 'q' });
+        if (!move) return;
+        board.setPosition(game.fen());
+        updateStatus();
+        lastMove = { from: move.from, to: move.to };
+        refreshOverlays();
+        renderMoves();
+        save();
+        majLien();
       });
 
       btnFlip.addEventListener("click", () => {
         board.flip();
       });
 
+      btnImportFEN.addEventListener('click', () => {
+        const fen = prompt('Coller la FEN à importer');
+        if (!fen) return;
+        try { game.load(fen); board.setPosition(game.fen()); lastMove = null; redoStack = []; updateStatus(); renderMoves(); save(); majLien(); refreshOverlays(); }
+        catch { alert('FEN invalide'); }
+      });
+
+      btnImportPGN.addEventListener('click', () => {
+        const pgn = prompt('Coller le PGN à importer');
+        if (!pgn) return;
+        try { game.loadPgn(pgn); board.setPosition(game.fen()); lastMove = null; redoStack = []; updateStatus(); renderMoves(); save(); majLien(); refreshOverlays(); }
+        catch { alert('PGN invalide'); }
+      });
+
+      btnShareLink.addEventListener('click', async () => {
+        majLien();
+        try { await navigator.clipboard.writeText(location.href); statusEl.textContent = 'Lien copié.'; }
+        catch { alert('Copie impossible. Sélectionne et copie l’URL dans la barre du navigateur.'); }
+      });
+
+      btnCapture.addEventListener('click', async () => {
+        try {
+          const dataUrl = await window.domtoimage.toPng(board);
+          const a = document.createElement('a');
+          a.href = dataUrl;
+          a.download = 'echiquier.png';
+          a.click();
+        } catch (e) { alert('Capture impossible'); }
+      });
+
+      btnThemeToggle.addEventListener('click', () => {
+        const cur = document.documentElement.dataset.theme;
+        document.documentElement.dataset.theme = cur === 'dark' ? '' : 'dark';
+        save();
+      });
+
+      sizeInput.addEventListener('input', () => {
+        document.documentElement.style.setProperty('--max', sizeInput.value + 'px');
+        save();
+      });
+
+      // Gestion clavier simple pour navigation et déplacement
+      function moveFocus(dx, dy){
+        if (!focusSq) focusSq = 'e2';
+        const file = focusSq.charCodeAt(0) - 97; // a=0
+        const rank = parseInt(focusSq[1],10); // 1..8
+        let nf = Math.min(7, Math.max(0, file + dx));
+        let nr = Math.min(8, Math.max(1, rank + dy));
+        focusSq = String.fromCharCode(97 + nf) + nr;
+        refreshOverlays();
+      }
+      document.addEventListener('keydown', (ev) => {
+        if (['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Enter',' '].includes(ev.key)) ev.preventDefault();
+        if (ev.key === 'ArrowLeft') moveFocus(-1, 0);
+        if (ev.key === 'ArrowRight') moveFocus(1, 0);
+        if (ev.key === 'ArrowUp') moveFocus(0, 1);
+        if (ev.key === 'ArrowDown') moveFocus(0, -1);
+        if (ev.key === 'Enter' || ev.key === ' ') {
+          if (!focusSq) return;
+          if (!selectedSq) {
+            const p = game.get(focusSq);
+            if (!p) { playSound('move'); return; }
+            if ((game.turn()==='w' && p.color!=='w') || (game.turn()==='b' && p.color!=='b')) return;
+            selectedSq = focusSq; // saisir
+          } else {
+            // tentative de coup clavier
+            const piece = game.get(selectedSq);
+            const isPawn = piece && piece.type === 'p';
+            const lastRank = (piece && piece.color === 'w') ? '8' : '1';
+            const isPromo = isPawn && focusSq.endsWith(lastRank);
+            let promo = 'q';
+            const doMove = async () => {
+              if (isPromo) promo = await choisirPromotion();
+              const mv = game.move({ from: selectedSq, to: focusSq, promotion: promo });
+              if (!mv) { playSound('check'); selectedSq = null; refreshOverlays(); return; }
+              redoStack = [];
+              lastMove = { from: mv.from, to: mv.to };
+              board.setPosition(game.fen());
+              updateStatus();
+              refreshOverlays();
+              renderMoves();
+              save();
+              majLien();
+              if (mv.flags && mv.flags.includes('c')) playSound('capture');
+              else if (game.in_check()) playSound('check');
+              else playSound('move');
+              selectedSq = null;
+            };
+            doMove();
+          }
+          refreshOverlays();
+        }
+      });
+
       // Init
-      updateStatus();
+      load();
+      if (!game.history().length) updateStatus();
+      renderMoves();
+
+      // Taille par défaut côté CSS si non stockée
+      if (sizeInput && !sizeInput.value) sizeInput.value = 560;
+      refreshOverlays();
     </script>
+    <script src="https://unpkg.com/dom-to-image-more@3.3.0/dist/dom-to-image-more.min.js"></script>
   </body>
 </html>
