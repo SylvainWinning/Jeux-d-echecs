@@ -147,6 +147,20 @@
         `;
       }
 
+      // Retourne les coups possibles pour une case,
+      // même si ce n'est pas au tour de cette couleur
+      function movesFor(square) {
+        const piece = game.get(square);
+        if (!piece) return [];
+        if (piece.color === game.turn()) {
+          return game.moves({ square, verbose: true });
+        }
+        const fen = game.fen().split(" ");
+        fen[1] = piece.color;
+        const tmp = new Chess(fen.join(" "));
+        return tmp.moves({ square, verbose: true });
+      }
+
       function renderMoves() {
         if (!movesEl) return;
         const hist = game.history({ verbose: true });
@@ -237,7 +251,7 @@
           clearHighlights();
           const sq = e.detail.square;
           highlight(sq);
-          const ms = game.moves({ square: sq, verbose: true });
+          const ms = movesFor(sq);
           for (const m of ms) {
             const type = m.promotion ? 'promo' : (m.flags && m.flags.includes('c')) ? 'capture' : 'move';
             highlightType(m.to, type);
@@ -271,7 +285,7 @@
       board.addEventListener("mouseover-square", (e) => {
         if (!aidesEl.checked) return;
         const { square } = e.detail;
-        const moves = game.moves({ square, verbose: true });
+        const moves = movesFor(square);
         if (!moves.length) return;
         highlight(square);
         for (const m of moves) {
@@ -292,7 +306,7 @@
         const { square } = e.detail;
         clearHighlights();
         highlight(square);
-        const moves = game.moves({ square, verbose: true });
+        const moves = movesFor(square);
         for (const m of moves) {
           const type = m.promotion ? 'promo' : (m.flags && m.flags.includes('c')) ? 'capture' : 'move';
           highlightType(m.to, type);
