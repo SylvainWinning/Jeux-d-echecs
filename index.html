@@ -62,7 +62,7 @@
 
         <div class="panel">
           <div class="hint">
-            Objectif: jouer des coups légaux. Survole une pièce pour voir ses cases possibles.
+            Objectif: jouer des coups légaux. Survole, clique ou prends une pièce pour voir ses cases possibles.
             Les pions de l’adversaire sont roses pour mieux les distinguer.
           </div>
         </div>
@@ -226,226 +226,20 @@
             (game.turn() === "b" && piece.startsWith("w"))) {
           e.preventDefault();
         }
-        <!doctype html>
-<html lang="fr">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>Échecs débutant • Pions roses</title>
 
-    <!-- UI du plateau -->
-    <script type="module" src="https://unpkg.com/chessboard-element?module"></script>
-    <style>
-      :root { --gap: 12px; --max: 560px; }
-      body { margin: 0; font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif; }
-      .wrap { min-height: 100svh; display: grid; place-items: center; padding: 16px; background: #f6f7fb; }
-      .app { width: min(95vw, 900px); display: grid; gap: var(--gap); justify-items: center; }
-      .controls { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
-      .controls > * { font-size: 14px; padding: 8px 10px; border-radius: 8px; border: 1px solid #e2e5ec; background: white; cursor: pointer; }
-      .controls select { cursor: pointer; }
-      .panel { width: min(95vw, var(--max)); display: grid; gap: 6px; background: white; border: 1px solid #e2e5ec; border-radius: 12px; padding: 10px 12px; }
-      chess-board { width: min(90vmin, var(--max)); max-width: var(--max); }
-      .hint { color: #6b7280; font-size: 13px; }
-      .ok { color: #047857; }
-      .warn { color: #b45309; }
-      .bad { color: #b91c1c; }
-      .moves { margin: 0; padding-left: 20px; max-height: 220px; overflow: auto; }
-      .moves li { cursor: pointer; line-height: 1.4; }
-      .moves li.active { font-weight: 600; }
-    </style>
-  </head>
-  <body>
-    <div class="wrap">
-      <div class="app">
-        <div class="panel">
-          <div class="controls">
-            <label>
-              Mode
-              <select id="mode">
-                <option value="hvh">2 joueurs - même écran</option>
-              </select>
-            </label>
-
-            <label>
-              <input type="checkbox" id="aides" checked />
-              Aides débutant
-            </label>
-
-            <button id="undo">Annuler</button>
-            <button id="reset">Nouvelle partie</button>
-            <button id="exportPGN">Exporter PGN</button>
-            <button id="flip">Inverser le plateau</button>
-          </div>
-
-          <div id="status" class="hint"></div>
-        </div>
-
-        <!-- Le plateau. Notation visible par défaut, pièces déplaçables -->
-        <chess-board id="board" position="start" draggable-pieces></chess-board>
-
-        <div class="panel" id="movesPanel">
-          <div class="hint">Historique des coups (clique pour revenir à une position)</div>
-          <ol id="moves" class="moves"></ol>
-        </div>
-
-        <div class="panel">
-          <div class="hint">
-            Objectif: jouer des coups légaux. Survole une pièce pour voir ses cases possibles.
-            Les pions de l’adversaire sont roses pour mieux les distinguer.
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Logique du jeu + règles -->
-    <script type="module">
-      import { Chess } from "https://unpkg.com/chess.js@1.4.0/dist/esm/chess.js";
-
-      const board = document.getElementById("board");
-      const statusEl = document.getElementById("status");
-      const modeEl = document.getElementById("mode");
-      const aidesEl = document.getElementById("aides");
-      const btnUndo = document.getElementById("undo");
-      const btnReset = document.getElementById("reset");
-      const btnFlip = document.getElementById("flip");
-      const btnExportPGN = document.getElementById("exportPGN");
-      const movesEl = document.getElementById("moves");
-
-      const game = new Chess();
-
-      // Thème des pièces: on remplace UNIQUEMENT le pion noir par un pion rose.
-      // Les autres pièces utilisent le set "wikipedia" hébergé par chessboard-element.
-      const pinkPawnSvg = encodeURIComponent(`
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 45 45">
-          <g fill="#ff4da6" stroke="#cc2c85" stroke-width="1.5" stroke-linejoin="round">
-            <circle cx="22.5" cy="12" r="5.5"/>
-            <path d="M15 30c-2.5-3 1-6 7.5-6S32 27 30 30l1 6H14z"/>
-            <rect x="13" y="36" width="19" height="3" rx="1.5"/>
-            <rect x="10" y="39" width="25" height="3" rx="1.5"/>
-          </g>
-        </svg>
-      `);
-      const pinkPawnDataUrl = `data:image/svg+xml;utf8,${pinkPawnSvg}`;
-
-      board.pieceTheme = (piece) => {
-        if (piece === "bP") return pinkPawnDataUrl;
-        // images PNG du set "wikipedia" fourni par chessboard-element
-        return `https://unpkg.com/chessboard-element@1.2.0/chesspieces/wikipedia/${piece}.png`;
-      };
-
-      // Styles dynamiques pour surligner les cases possibles
-      const highlightStyles = document.createElement("style");
-      document.head.append(highlightStyles);
-
-      let lastMove = null; // {from, to}
-
-      function clearHighlights() {
-        highlightStyles.textContent = "";
-      }
-
-      function highlight(square) {
-        const whiteSq = "#e8e8e8";
-        const blackSq = "#cfcfcf";
-        const isWhite = ((square.charCodeAt(0) + square.charCodeAt(1)) % 2) === 0;
-        const bg = isWhite ? whiteSq : blackSq;
-        // chessboard-element expose des parts par case sous la forme square-a1
-        highlightStyles.textContent += `
-          chess-board::part(square-${square}) { box-shadow: inset 0 0 3px 3px ${bg}; }
-        `;
-      }
-
-      function highlightLastMove(m) {
-        if (!m) return;
-        // Accentuer la source et la cible du dernier coup
-        highlightStyles.textContent += `
-          chess-board::part(square-${m.from}) { box-shadow: inset 0 0 0 3px rgba(34,197,94,.6); }
-          chess-board::part(square-${m.to}) { box-shadow: inset 0 0 0 3px rgba(59,130,246,.6); }
-        `;
-      }
-
-      function renderMoves() {
-        if (!movesEl) return;
-        const hist = game.history({ verbose: true });
-        movesEl.innerHTML = hist.map((m, i) => {
-          const half = i + 1;
-          const turn = Math.ceil(half / 2);
-          const prefix = half % 2 === 1 ? `${turn}. ` : `\u00A0`;
-          const san = m.san;
-          return `<li data-ply="${half}">${prefix}${san}</li>`;
-        }).join("");
-
-        // Activer clic pour revenir à une position
-        movesEl.querySelectorAll("li").forEach(li => {
-          li.addEventListener("click", () => {
-            const targetPly = parseInt(li.getAttribute("data-ply"), 10);
-            const pgn = game.pgn();
-            const tmp = new Chess();
-            // Rejouer jusqu'au demi-coup choisi
-            const moves = pgn.split(/\s+/).filter(x => /[a-hKQRNB0-9O-]/.test(x));
-            tmp.reset();
-            for (let i=0, ply=0; i<moves.length && ply<targetPly; i++) {
-              const mv = moves[i];
-              if (/^\d+\./.test(mv)) continue; // ignore "1." etc.
-              tmp.move(mv);
-              ply++;
-            }
-            game.load(tmp.fen());
-            board.setPosition(game.fen());
-            lastMove = null;
-            clearHighlights();
-            highlightLastMove(tmp.history({ verbose:true }).slice(-1)[0]);
-            updateStatus();
-            save();
-            // Marquer l'élément actif
-            movesEl.querySelectorAll("li").forEach(el => el.classList.remove("active"));
-            li.classList.add("active");
-          });
-        });
-      }
-
-      function save() {
-        const data = {
-          fen: game.fen(),
-          flip: board.orientation(),
-          mode: modeEl.value,
-          aides: aidesEl.checked,
-        };
-        try { localStorage.setItem("chess-beginner", JSON.stringify(data)); } catch {}
-      }
-
-      function load() {
-        try {
-          const raw = localStorage.getItem("chess-beginner");
-          if (!raw) return;
-          const s = JSON.parse(raw);
-          if (s.fen) { game.load(s.fen); board.setPosition(s.fen); }
-          if (s.flip === "black") board.flip();
-          if (s.mode) modeEl.value = s.mode;
-          if (typeof s.aides === "boolean") aidesEl.checked = s.aides;
-          renderMoves();
-          updateStatus();
-        } catch {}
-      }
-
-      function updateStatus() {
-        let turn = game.turn() === "w" ? "Blancs" : "Noirs";
-        let text = `${turn} à jouer.`;
-
-        if (game.in_checkmate()) text = `Échec et mat. ${turn} perdent.`;
-        else if (game.in_draw()) text = "Partie nulle.";
-        else if (game.in_check()) text += " Échec !";
-
-        statusEl.textContent = text;
-        statusEl.className = "hint " + (game.in_checkmate() ? "bad" : game.in_check() ? "warn" : "ok");
-      }
-
-      // Empêche de prendre une pièce si ce n'est pas son tour ou si la partie est finie
-      board.addEventListener("drag-start", (e) => {
-        const { piece } = e.detail;
-        if (game.game_over()) { e.preventDefault(); return; }
-        if ((game.turn() === "w" && piece.startsWith("b")) ||
-            (game.turn() === "b" && piece.startsWith("w"))) {
-          e.preventDefault();
+        // Affiche les coups possibles dès la prise en main de la pièce
+        if (aidesEl.checked && e.detail && e.detail.square) {
+          clearHighlights();
+          const sq = e.detail.square;
+          highlight(sq);
+          const ms = game.moves({ square: sq, verbose: true });
+          for (const m of ms) {
+            const type = m.promotion ? 'promo' : (m.flags && m.flags.includes('c')) ? 'capture' : 'move';
+            highlightType(m.to, type);
+          }
+          statusEl.textContent = ms.length
+            ? `Cases possibles pour ${sq}: ${[...new Set(ms.map(x => x.to))].join(', ')}`
+            : `Aucun coup disponible pour ${sq}.`;
         }
       });
 
@@ -480,9 +274,26 @@
           highlightType(m.to, type);
         }
       });
+
       board.addEventListener("square-mouseout", () => {
         clearHighlights();
         highlightLastMove(lastMove);
+      });
+
+      // Click pour sélectionner une pièce et lister ses coups
+      board.addEventListener('square-click', (e) => {
+        if (!aidesEl.checked) return;
+        const { square } = e.detail;
+        clearHighlights();
+        highlight(square);
+        const moves = game.moves({ square, verbose: true });
+        for (const m of moves) {
+          const type = m.promotion ? 'promo' : (m.flags && m.flags.includes('c')) ? 'capture' : 'move';
+          highlightType(m.to, type);
+        }
+        statusEl.textContent = moves.length
+          ? `Cases possibles pour ${square}: ${[...new Set(moves.map(x => x.to))].join(', ')}`
+          : `Aucun coup disponible pour ${square}.`;
       });
 
       // Synchronise l'affichage après un snap ou roque
