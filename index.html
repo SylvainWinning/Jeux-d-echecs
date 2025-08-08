@@ -126,6 +126,13 @@
         `;
       }
 
+      function highlightType(square, type) {
+        const color = type === 'capture' ? 'rgba(239,68,68,.35)'
+                     : type === 'promo' ? 'rgba(234,179,8,.35)'
+                     : 'rgba(34,197,94,.35)';
+        highlightStyles.textContent += `\nchess-board::part(square-${square}) { box-shadow: inset 0 0 6px 6px ${color}; }`;
+      }
+
       function highlightLastMove(m) {
         if (!m) return;
         // Accentuer la source et la cible du dernier coup
@@ -468,7 +475,10 @@
         const moves = game.moves({ square, verbose: true });
         if (!moves.length) return;
         highlight(square);
-        for (const m of moves) highlight(m.to);
+        for (const m of moves) {
+          const type = m.promotion ? 'promo' : (m.flags && m.flags.includes('c')) ? 'capture' : 'move';
+          highlightType(m.to, type);
+        }
       });
       board.addEventListener("square-mouseout", () => {
         clearHighlights();
@@ -501,6 +511,13 @@
 
       btnFlip.addEventListener("click", () => {
         board.flip();
+      });
+
+      aidesEl.addEventListener('change', () => {
+        if (!aidesEl.checked) {
+          clearHighlights();
+          highlightLastMove(lastMove); // on garde juste le dernier coup visible
+        }
       });
 
       btnExportPGN.addEventListener("click", async () => {
