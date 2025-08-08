@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Échecs débutant • Pions roses</title>
+
+    <!-- UI du plateau -->
+    <script type="module" src="https://unpkg.com/chessboard-element?module"></script>
+    <style>
+      :root { --gap: 12px; --max: 560px; }
+      body { margin: 0; font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif; }
+      .wrap { min-height: 100svh; display: grid; place-items: center; padding: 16px; background: #f6f7fb; }
+      .app { width: min(95vw, 900px); display: grid; gap: var(--gap); justify-items: center; }
+      .controls { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
+      .controls > * { font-size: 14px; padding: 8px 10px; border-radius: 8px; border: 1px solid #e2e5ec; background: white; cursor: pointer; }
+      .controls select { cursor: pointer; }
+      .panel { width: min(95vw, var(--max)); display: grid; gap: 6px; background: white; border: 1px solid #e2e5ec; border-radius: 12px; padding: 10px 12px; }
+      chess-board { width: min(90vmin, var(--max)); max-width: var(--max); }
+      .hint { color: #6b7280; font-size: 13px; }
+      .ok { color: #047857; }
+      .warn { color: #b45309; }
+      .bad { color: #b91c1c; }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="app">
+        <div class="panel">
+          <div class="controls">
+            <label>
+              Mode
+              <select id="mode">
+                <option value="hvh">2 joueurs - même écran</option>
+                <option value="hvb">Contre l'ordi - facile</option>
+              </select>
+            </label>
+
+            <label>
+              <input type="checkbox" id="aides" checked />
+              Aides débutant
+            </label>
+
+            <button id="undo">Annuler</button>
+            <button id="reset">Nouvelle partie</button>
+            <button id="flip">Inverser le plateau</button>
+          </div>
+
+          <div id="status" class="hint"></div>
+        </div>
+
+        <!-- Le plateau. Notation visible par défaut, pièces déplaçables -->
+        <chess-board id="board" position="start" draggable-pieces></chess-board>
+
+        <div class="panel">
+          <div class="hint">
+            Objectif: jouer des coups légaux. Survole une pièce pour voir ses cases possibles.
+            Les pions de l’adversaire sont roses pour mieux les distinguer.
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Logique du jeu + règles -->
+    <script type="module">
+      import { Chess } from "https://unpkg.com/chess.js@1.4.0/dist/esm/chess.js";
+
+      const board = document.getElementById("board");
+      const statusEl = document.getElementById("status");
+      const modeEl = document.getElementById("mode");
+      const aidesEl = document.getElementById("aides");
+      const btnUndo = document.getElementById("undo");
+      const btnReset = document.getElementById("reset");
+      const btnFlip = document.getElementById("flip");
+
+      const game = new Chess();
+
+      // Thème des pièces: on remplace UNIQUEMENT le pion noir par un pion rose.
+      // Les autres pièces utilisent le set "wikipedia" hébergé par chessboard-element.
+      const pinkPawnSvg = encodeURIComponent(`
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 45 45">
+          <g fill="#ff4da6" stroke="#cc2c85" stroke-width="1.5" stroke-linejoin="round">
+            <circle cx="22.5" cy="12" r="5.5"/>
+            <path d="M15 30c-2.5-3 1-6 7.5-6S32 27 30 30l1 6H14z"/>
+            <rect x="13" y="36" width="19" height="3" rx="1.5"/>
+            <rect x="10" y="39" width="25" height="3" rx="1.5"/>
+          </g>
+        </svg>
+      `);
+      const pinkPawnDataUrl = `data:image/svg+xml;utf8,${pinkPawnSvg}`;
+
+      board.pieceTheme = (piece) => {
+        if (piece === "bP") return pinkPawnDataUrl;
+        // images PNG du set "wikipedia" fourni par chessboard-element
+        return `https://unpkg.com/chessboard-element@1.2.0/chesspieces/wikipedia/${piece}.png`;
+      };
+
+      // Styles dynamiques pour surligner les cases possibles
+      const highlightStyles = document.createElement("style");
+      document.head.append(highlightStyles);
+
+      function clearHighlights() {
+        highlightStyles.textContent = "";
+      }
+      function highlight(square) {
+        // Couleur selon la couleur de la case
+        const whiteSq = "#e8e8e8";
+        const blackSq = "#cfcfcf";
+        const isWhite = ((square.charCodeAt(0) + square.charCodeAt(1)) % 2) === 0;
+        const bg = isWhite ? whiteSq : blackSq;
+        highlightStyles.textContent += `
+          chess-board::part(${square}) { box-shadow: inset 0 0 3px 3px ${bg}; }
+        `;
+      }
+
+      function updateStatus() {
+        let turn = game.turn() === "w" ? "Blancs" : "Noirs";
+        let text = `${turn} à jouer.`;
+
+        if (game.in_checkmate()) text = `Échec et mat. ${turn} perdent.`;
+        else if (game.in_draw()) text = "Partie nulle.";
+        else if (game.in_check()) text += " Échec !";
+
+        statusEl.textContent = text;
+        statusEl.className = "hint " + (game.in_checkmate() ? "bad" : game.in_check() ? "warn" : "ok");
+      }
+
+      function makeRandomComputerMove() {
+        if (game.game_over()) return;
+        const moves = game.moves({ verbose: true });
+        if (!moves.length) return;
+        const move = moves[Math.floor(Math.random() * moves.length)];
+        game.move(move.san);
+        board.setPosition(game.fen());
+        updateStatus();
+      }
+
+      // Empêche de prendre une pièce si ce n'est pas son tour ou si la partie est finie
+      board.addEventListener("drag-start", (e) => {
+        const { piece } = e.detail;
+        if (game.game_over()) { e.preventDefault(); return; }
+        if ((game.turn() === "w" && piece.startsWith("b")) ||
+            (game.turn() === "b" && piece.startsWith("w"))) {
+          e.preventDefault();
+        }
+      });
+
+      // Dépôt de la pièce
+      board.addEventListener("drop", (e) => {
+        const { source, target, setAction } = e.detail;
+        clearHighlights();
+        const move = game.move({ from: source, to: target, promotion: "q" });
+        if (move === null) {
+          setAction("snapback"); // coup illégal
+          return;
+        }
+        updateStatus();
+
+        // Mode contre l'ordi
+        if (modeEl.value === "hvb" && !game.game_over()) {
+          setTimeout(makeRandomComputerMove, 300);
+        }
+      });
+
+      // Surlignage des coups possibles au survol
+      board.addEventListener("mouseover-square", (e) => {
+        if (!aidesEl.checked) return;
+        const { square } = e.detail;
+        const moves = game.moves({ square, verbose: true });
+        if (!moves.length) return;
+        highlight(square);
+        for (const m of moves) highlight(m.to);
+      });
+      board.addEventListener("mouseout-square", () => clearHighlights());
+
+      // Synchronise l'affichage après un snap ou roque
+      board.addEventListener("snap-end", () => board.setPosition(game.fen()));
+
+      // Boutons
+      btnReset.addEventListener("click", () => {
+        game.reset();
+        board.start();
+        updateStatus();
+        clearHighlights();
+      });
+
+      btnUndo.addEventListener("click", () => {
+        // En mode vs ordi, on annule 2 demi-coups pour revenir à ton tour
+        if (modeEl.value === "hvb") { game.undo(); game.undo(); }
+        else { game.undo(); }
+        board.setPosition(game.fen());
+        updateStatus();
+      });
+
+      btnFlip.addEventListener("click", () => {
+        board.flip();
+      });
+
+      // Init
+      updateStatus();
+    </script>
+  </body>
+</html>
