@@ -117,7 +117,7 @@
 
       function highlight(square) {
         const whiteSq = "#e8e8e8";
-        const blackSq = "#cfcfcf";
+               const blackSq = "#cfcfcf";
         const isWhite = ((square.charCodeAt(0) + square.charCodeAt(1)) % 2) === 0;
         const bg = isWhite ? whiteSq : blackSq;
         // chessboard-element expose des parts par case sous la forme square-a1
@@ -135,7 +135,6 @@
 
       function highlightLastMove(m) {
         if (!m) return;
-        // Accentuer la source et la cible du dernier coup
         highlightStyles.textContent += `
           chess-board::part(square-${m.from}) { box-shadow: inset 0 0 0 3px rgba(34,197,94,.6); }
           chess-board::part(square-${m.to}) { box-shadow: inset 0 0 0 3px rgba(59,130,246,.6); }
@@ -159,12 +158,11 @@
             const targetPly = parseInt(li.getAttribute("data-ply"), 10);
             const pgn = game.pgn();
             const tmp = new Chess();
-            // Rejouer jusqu'au demi-coup choisi
             const moves = pgn.split(/\s+/).filter(x => /[a-hKQRNB0-9O-]/.test(x));
             tmp.reset();
             for (let i=0, ply=0; i<moves.length && ply<targetPly; i++) {
               const mv = moves[i];
-              if (/^\d+\./.test(mv)) continue; // ignore "1." etc.
+              if (/^\d+\./.test(mv)) continue;
               tmp.move(mv);
               ply++;
             }
@@ -175,7 +173,6 @@
             highlightLastMove(tmp.history({ verbose:true }).slice(-1)[0]);
             updateStatus();
             save();
-            // Marquer l'élément actif
             movesEl.querySelectorAll("li").forEach(el => el.classList.remove("active"));
             li.classList.add("active");
           });
@@ -218,7 +215,7 @@
         statusEl.className = "hint " + (game.in_checkmate() ? "bad" : game.in_check() ? "warn" : "ok");
       }
 
-      // Empêche de prendre une pièce si ce n'est pas son tour ou si la partie est finie
+      // DRAG START: empêche de prendre hors tour + affiche d’emblée les coups possibles
       board.addEventListener("drag-start", (e) => {
         const { piece } = e.detail;
         if (game.game_over()) { e.preventDefault(); return; }
@@ -227,7 +224,6 @@
           e.preventDefault();
         }
 
-        // Affiche les coups possibles dès la prise en main de la pièce
         if (aidesEl.checked && e.detail && e.detail.square) {
           clearHighlights();
           const sq = e.detail.square;
@@ -243,7 +239,7 @@
         }
       });
 
-      // Dépôt de la pièce simple (déplacement + synchro + surlignage)
+      // DROP: applique le coup, synchro plateau, surlignage, historique
       board.addEventListener("drop", (e) => {
         const { source, target, setAction } = e.detail;
         const move = game.move({ from: source, to: target, promotion: "q" });
@@ -262,8 +258,8 @@
         updateStatus();
       });
 
-      // Surlignage des coups possibles au survol
-      board.addEventListener("square-mouseover", (e) => {
+      // SURVOL: affiche les coups possibles (couleurs par type)
+      board.addEventListener("mouseover-square", (e) => {
         if (!aidesEl.checked) return;
         const { square } = e.detail;
         const moves = game.moves({ square, verbose: true });
@@ -275,13 +271,14 @@
         }
       });
 
-      board.addEventListener("square-mouseout", () => {
+      // FIN SURVOL: nettoie, mais garde le dernier coup
+      board.addEventListener("mouseout-square", () => {
         clearHighlights();
         highlightLastMove(lastMove);
       });
 
-      // Click pour sélectionner une pièce et lister ses coups
-      board.addEventListener('square-click', (e) => {
+      // CLIC: sélectionner une pièce et lister ses coups
+      const onSquareSelect = (e) => {
         if (!aidesEl.checked) return;
         const { square } = e.detail;
         clearHighlights();
@@ -294,9 +291,12 @@
         statusEl.textContent = moves.length
           ? `Cases possibles pour ${square}: ${[...new Set(moves.map(x => x.to))].join(', ')}`
           : `Aucun coup disponible pour ${square}.`;
-      });
+      };
+      board.addEventListener("mousedown-square", onSquareSelect);
+      // Optionnel: compat pour d’autres versions
+      board.addEventListener("square-click", onSquareSelect);
 
-      // Synchronise l'affichage après un snap ou roque
+      // Synchronise l'affichage après un snap/roque
       board.addEventListener("snap-end", () => board.setPosition(game.fen()));
 
       // Boutons
@@ -324,10 +324,10 @@
         board.flip();
       });
 
-      aidesEl.addEventListener('change', () => {
+      aidesEl.addEventListener("change", () => {
         if (!aidesEl.checked) {
           clearHighlights();
-          highlightLastMove(lastMove); // on garde juste le dernier coup visible
+          highlightLastMove(lastMove);
         }
       });
 
@@ -337,7 +337,6 @@
           await navigator.clipboard.writeText(pgn);
           statusEl.textContent = "PGN copié dans le presse-papiers.";
         } catch {
-          // Fallback: télécharger un fichier .pgn
           const blob = new Blob([pgn], { type: "application/x-chess-pgn" });
           const a = document.createElement("a");
           a.href = URL.createObjectURL(blob);
