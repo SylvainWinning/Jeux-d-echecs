@@ -101,7 +101,6 @@
 
       board.pieceTheme = (piece) => {
         if (piece === "bP") return pinkPawnDataUrl;
-        // images PNG du set "wikipedia" fourni par chessboard-element
         return `https://unpkg.com/chessboard-element@1.2.0/chesspieces/wikipedia/${piece}.png`;
       };
 
@@ -117,27 +116,34 @@
 
       function highlight(square) {
         const whiteSq = "#e8e8e8";
-               const blackSq = "#cfcfcf";
+        const blackSq = "#cfcfcf";
         const isWhite = ((square.charCodeAt(0) + square.charCodeAt(1)) % 2) === 0;
         const bg = isWhite ? whiteSq : blackSq;
-        // chessboard-element expose des parts par case sous la forme square-a1
         highlightStyles.textContent += `
-          chess-board::part(square-${square}) { box-shadow: inset 0 0 3px 3px ${bg}; }
+          chess-board::part(square-${square}) {
+            box-shadow: inset 0 0 3px 3px ${bg} !important;
+            outline: 2px solid rgba(0,0,0,.06); outline-offset: -4px;
+          }
         `;
       }
 
       function highlightType(square, type) {
         const color = type === 'capture' ? 'rgba(239,68,68,.35)'
-                     : type === 'promo' ? 'rgba(234,179,8,.35)'
-                     : 'rgba(34,197,94,.35)';
-        highlightStyles.textContent += `\nchess-board::part(square-${square}) { box-shadow: inset 0 0 6px 6px ${color}; }`;
+                     : type === 'promo'   ? 'rgba(234,179,8,.35)'
+                     :                      'rgba(34,197,94,.35)';
+        highlightStyles.textContent += `
+          chess-board::part(square-${square}) {
+            box-shadow: inset 0 0 6px 6px ${color} !important;
+            outline: 2px solid rgba(0,0,0,.06); outline-offset: -4px;
+          }
+        `;
       }
 
       function highlightLastMove(m) {
         if (!m) return;
         highlightStyles.textContent += `
-          chess-board::part(square-${m.from}) { box-shadow: inset 0 0 0 3px rgba(34,197,94,.6); }
-          chess-board::part(square-${m.to}) { box-shadow: inset 0 0 0 3px rgba(59,130,246,.6); }
+          chess-board::part(square-${m.from}) { box-shadow: inset 0 0 0 3px rgba(34,197,94,.7) !important; }
+          chess-board::part(square-${m.to})   { box-shadow: inset 0 0 0 3px rgba(59,130,246,.7) !important; }
         `;
       }
 
@@ -192,12 +198,15 @@
       function load() {
         try {
           const raw = localStorage.getItem("chess-beginner");
-          if (!raw) return;
-          const s = JSON.parse(raw);
+          const s = raw ? JSON.parse(raw) || {} : {};
           if (s.fen) { game.load(s.fen); board.setPosition(s.fen); }
           if (s.flip === "black") board.flip();
           if (s.mode) modeEl.value = s.mode;
-          if (typeof s.aides === "boolean") aidesEl.checked = s.aides;
+          if (Object.prototype.hasOwnProperty.call(s, "aides")) {
+            aidesEl.checked = !!s.aides;
+          } else {
+            aidesEl.checked = true; // ON par défaut si pas de préférence
+          }
           renderMoves();
           updateStatus();
         } catch {}
@@ -293,7 +302,12 @@
           : `Aucun coup disponible pour ${square}.`;
       };
       board.addEventListener("mousedown-square", onSquareSelect);
-      // Optionnel: compat pour d’autres versions
+
+      // Fallback compat si une autre build émet les anciens noms
+      board.addEventListener("square-mouseover", (e) =>
+        board.dispatchEvent(new CustomEvent("mouseover-square", { detail: e.detail })));
+      board.addEventListener("square-mouseout", (e) =>
+        board.dispatchEvent(new CustomEvent("mouseout-square", { detail: e.detail })));
       board.addEventListener("square-click", onSquareSelect);
 
       // Synchronise l'affichage après un snap/roque
@@ -325,9 +339,13 @@
       });
 
       aidesEl.addEventListener("change", () => {
+        save();
         if (!aidesEl.checked) {
           clearHighlights();
           highlightLastMove(lastMove);
+          statusEl.textContent = "Aides désactivées.";
+        } else {
+          statusEl.textContent = "Aides activées. Survole ou clique une pièce.";
         }
       });
 
